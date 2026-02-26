@@ -2,7 +2,7 @@ import { Router } from "express"
 import fs from "fs"
 import path from "path"
 import multer from "multer"
-import { getStudentInfo, resendOtp, studentInfo, studentLogin, studentRegister, updateStudentInfo, verifyEmailOtp } from "../controllers/student.controller.js"
+import { getStudentInfo, resendOtp, studentLogin, studentRegister, updateStudentInfo, verifyEmailOtp, Me } from "../controllers/student.controller.js"
 import { userAuth } from "../middleware/authMiddleware.js";
 
 const studentSave = Router()
@@ -38,6 +38,9 @@ studentSave.patch("/student-update", userAuth, upload.fields([
 	{ name: 'qualificationCert', maxCount: 1 },
 ]), updateStudentInfo)
 studentSave.get("/get-student-data", getStudentInfo)
+
+// protected endpoint to get current logged-in student
+studentSave.get("/me", userAuth, Me);
 
 // studentSave.post("/student-update", userAuth, studentInfo)
 

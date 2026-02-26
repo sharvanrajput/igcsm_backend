@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken"
 
 
 const studentSchema = new mongoose.Schema(
+    
     {
         instituteName: {
             type: String,
@@ -119,6 +120,11 @@ const studentSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
+        role:{
+            type:String,
+            enum:["student","admin"],
+            default:"student"
+        }
     },
     {
         timestamps: true,

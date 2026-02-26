@@ -120,6 +120,7 @@ export const verifyEmailOtp = async (req, res) => {
                 token,
                 user,
             });
+
     } catch (error) {
         console.log(error);
         res.status(500).json({
@@ -166,35 +167,40 @@ export const resendOtp = async (req, res) => {
     }
 };
 
+
 export const studentLogin = async (req, res) => {
     try {
         const { email, password } = req.body
 
-        if (!email?.trim() || !password?.trim()) return res.status(400).json({ success: false, message: "All fields are required" })
+        if (!email?.trim() || !password?.trim())
+            return res.status(400).json({ success: false, message: "All fields are required" })
 
         const user = await Student.findOne({ email })
 
-        if (!user) return res.status(400).json({ success: false, message: "User not found" })
+        if (!user)
+            return res.status(400).json({ success: false, message: "User not found" })
 
         const checkpassword = await user.isPasswordCorrect(password)
-        if (!checkpassword) return res.status(400).json({ success: false, message: "Incrroct Password" })
-
-
-
-
-        res.status(200).send({ success: true, user, message: "User Login Successfully" })
+        if (!checkpassword)
+            return res.status(400).json({ success: false, message: "Incorrect Password" })
 
         const token = user.generateAcccessToken();
-
-
-        return res.cookie("token", token, options).status(200).send({ success: true, message: "User Login successfully", user })
-
+        // set cookie and return user
+        return res
+            .cookie("token", token, options)
+            .status(200)
+            .json({ success: true, message: "User Login successfully", user });
 
     } catch (error) {
         console.log(error.message)
-        res.send({ status: 500, message: "student login error" })
+        res.status(500).json({ success: false, message: "student login error" })
     }
 }
+
+
+
+
+
 
 export const updateStudentInfo = async (req, res) => {
     try {
@@ -270,6 +276,20 @@ export const getStudentInfo = async (req, res) => {
             success: false,
             message: "Failed to fetch students",
         });
+    }
+};
+
+// return currently authenticated user
+export const Me = (req, res) => {
+    try {
+        // userAuth middleware already attached user to req
+        if (!req.user) {
+            return res.status(401).json({ success: false, message: "Not authenticated" });
+        }
+        return res.status(200).json({ success: true, user: req.user });
+    } catch (error) {
+        console.error("getMe error", error.message);
+        return res.status(500).json({ success: false, message: "Server error" });
     }
 };
 
