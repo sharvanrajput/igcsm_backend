@@ -1,4 +1,5 @@
 import { Student } from "../models/student.model.js"
+import { Auth } from "../models/auth.model.js"
 import { sendmail } from "../utils/nodemailer.js"
 
 const options = {
@@ -19,34 +20,40 @@ export const studentRegister = async (req, res) => {
             });
         }
 
-        const existingUser = await Student.findOne({ email });
-        if (existingUser) {
+        const existingAuth = await Auth.findOne({ email });
+        if (existingAuth) {
             return res.status(400).json({
                 success: false,
                 message: "User already exists",
             });
         }
 
-        const user = await Student.create({
+        // create authentication record first
+        const auth = await Auth.create({
             email,
             password,
             mobile,
             studentName,
         });
 
+        // create an empty student profile linked to auth
+        await Student.create({ auth: auth._id });
+
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        user.otp = otp;
-        user.otpExpiry = Date.now() + 5 * 60 * 1000;
-        await user.save();
+        auth.otp = otp;
+        // OTP valid for 2 minutes
+        auth.otpExpiry = Date.now() + 2 * 60 * 1000;
+        await auth.save();
 
         await sendmail({ email, otp });
 
+        // return auth fields (client previously relied on these)
         return res.status(201).json({
             success: true,
             message: "OTP sent to email",
             otp,
-            user,
+            user: auth,
         });
 
     } catch (error) {
@@ -70,9 +77,9 @@ export const verifyEmailOtp = async (req, res) => {
             });
         }
 
-        const user = await Student.findOne({ email });
+        const auth = await Auth.findOne({ email });
 
-        if (!user) {
+        if (!auth) {
             return res.status(404).json({
                 success: false,
                 message: "User not found",
@@ -80,7 +87,7 @@ export const verifyEmailOtp = async (req, res) => {
         }
 
         // check otp
-        if (user.otp !== otp) {
+        if (auth.otp !== otp) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid OTP",
@@ -88,7 +95,7 @@ export const verifyEmailOtp = async (req, res) => {
         }
 
         // check expiry
-        if (Date.now() > user.otpExpiry) {
+        if (Date.now() > auth.otpExpiry) {
             return res.status(400).json({
                 success: false,
                 message: "OTP expired",
@@ -96,13 +103,13 @@ export const verifyEmailOtp = async (req, res) => {
         }
 
         // update verification
-        user.isEmailVerified = true;
-        user.otp = null;
-        user.otpExpiry = null;
+        auth.isEmailVerified = true;
+        auth.otp = null;
+        auth.otpExpiry = null;
 
-        await user.save();
+        await auth.save();
 
-        const token = user.generateAcccessToken();
+        const token = auth.generateAcccessToken();
 
         const options = {
             httpOnly: true,
@@ -110,6 +117,10 @@ export const verifyEmailOtp = async (req, res) => {
             sameSite: "lax",
 
         };
+
+        // fetch linked student profile (if any) so we can merge data
+        const student = await Student.findOne({ auth: auth._id });
+        const user = student ? { ...auth.toObject(), ...student.toObject() } : auth;
 
         return res
             .status(200)
@@ -135,9 +146,9 @@ export const resendOtp = async (req, res) => {
     try {
         const { email } = req.body;
 
-        const user = await Student.findOne({ email });
+        const auth = await Auth.findOne({ email });
 
-        if (!user) {
+        if (!auth) {
             return res.status(404).json({
                 success: false,
                 message: "User not found",
@@ -146,10 +157,11 @@ export const resendOtp = async (req, res) => {
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-        user.otp = otp;
-        user.otpExpiry = Date.now() + 5 * 60 * 1000;
+        auth.otp = otp;
+        // Resent OTP valid for 2 minutes
+        auth.otpExpiry = Date.now() + 2 * 60 * 1000;
 
-        await user.save();
+        await auth.save();
 
         await sendmail({ email, otp });
 
@@ -175,17 +187,19 @@ export const studentLogin = async (req, res) => {
         if (!email?.trim() || !password?.trim())
             return res.status(400).json({ success: false, message: "All fields are required" })
 
-        const user = await Student.findOne({ email })
+        const auth = await Auth.findOne({ email })
 
-        if (!user)
+        if (!auth)
             return res.status(400).json({ success: false, message: "User not found" })
 
-        const checkpassword = await user.isPasswordCorrect(password)
+        const checkpassword = await auth.isPasswordCorrect(password)
         if (!checkpassword)
             return res.status(400).json({ success: false, message: "Incorrect Password" })
 
-        const token = user.generateAcccessToken();
+        const token = auth.generateAcccessToken();
         // set cookie and return user
+        const student = await Student.findOne({ auth: auth._id });
+        const user = student ? { ...auth.toObject(), ...student.toObject() } : auth;
         return res
             .cookie("token", token, options)
             .status(200)
@@ -204,17 +218,29 @@ export const studentLogin = async (req, res) => {
 
 export const updateStudentInfo = async (req, res) => {
     try {
-        const { id } = req.user;
-        // Find the student and update fields, ensuring pre-save hooks run (e.g., password hashing)
-        const student = await Student.findById(id);
+        // pull student _id (not auth id) from attached user object
+        const studentId = req.user?._id || req.user?.id || null;
+        // Find the student and update fields
+        const student = await Student.findById(studentId);
         if (!student) {
             return res.status(404).json({ success: false, message: "Student not found" });
         }
 
-        // Update scalar fields from req.body
+        // keep track of auth fields that might be present
+        const authUpdates = {};
+        ["email", "password", "mobile", "studentName"].forEach((field) => {
+            if (req.body && req.body[field] !== undefined) {
+                authUpdates[field] = req.body[field];
+            }
+        }); 
+
+        // Update scalar fields on student profile from req.body
         Object.entries(req.body || {}).forEach(([key, value]) => {
-            // skip empty values
+            // skip undefined values and auth-related properties
             if (value === undefined) return;
+            if (["email", "password", "mobile", "studentName"].includes(key)) return;
+            // Do not set empty strings (prevents enum/validation errors)
+            if (typeof value === 'string' && value.trim() === '') return;
             student[key] = value;
         });
 
@@ -232,6 +258,17 @@ export const updateStudentInfo = async (req, res) => {
             }
             if (req.files.qualificationCert && req.files.qualificationCert[0]) {
                 student.qualificationCert = `/uploads/docs/${req.files.qualificationCert[0].filename}`;
+            }
+        }
+
+        // if auth-related values were provided, update the Auth document too
+        if (Object.keys(authUpdates).length > 0) {
+            const auth = await Auth.findById(student.auth);
+            if (auth) {
+                Object.entries(authUpdates).forEach(([k, v]) => {
+                    auth[k] = v;
+                });
+                await auth.save();
             }
         }
 

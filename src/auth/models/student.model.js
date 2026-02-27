@@ -1,12 +1,16 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
 
 
 
 const studentSchema = new mongoose.Schema(
-    
     {
+        // reference to authentication document
+        auth: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Auth",
+            required: true,
+        },
+
         instituteName: {
             type: String,
             // required: true,
@@ -18,10 +22,10 @@ const studentSchema = new mongoose.Schema(
             default: "",
         },
 
-        studentName: {
+        duration: {
             type: String,
-            required: true,
-            trim: true,
+            enum: ["Certification", "Diploma", "Advance Diploma", "P. G. Diploma Course", "Certificate", "Crash Course"],
+            default: null,
         },
 
         fatherName: {
@@ -47,34 +51,6 @@ const studentSchema = new mongoose.Schema(
             // required: true,
         },
 
-        email: {
-            type: String,
-            // required: true,
-            lowercase: true,
-            unique: true,
-            trim: true,
-        },
-        isEmailVerified: {
-            type: Boolean,
-            default: false
-        },
-        otpExpiry: {
-            type: Number,
-            default: 0
-        },
-        otp: {
-            type: String,
-            default: 0
-        },
-        password: {
-            type: String,
-            required: true,
-            trim: true,
-        },
-        mobile: {
-            type: String,
-            required: true,
-        },
         alternateMobile: {
             type: String,
         },
@@ -120,11 +96,6 @@ const studentSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
-        role:{
-            type:String,
-            enum:["student","admin"],
-            default:"student"
-        }
     },
     {
         timestamps: true,
@@ -132,17 +103,6 @@ const studentSchema = new mongoose.Schema(
 );
 
 
-studentSchema.pre("save", async function () {
-  if (!this.isModified("password")) return;
-  this.password = await bcrypt.hash(this.password, 10);
-});
-studentSchema.methods.isPasswordCorrect = async function (password) {
-    return await bcrypt.compare(password, this.password)
-}
-
-studentSchema.methods.generateAcccessToken = function () {
-    return jwt.sign({ id: this._id }, process.env.ACCESS_TOKEN_SECREAT, { expiresIn: "1d" })
-}
 
 
 
